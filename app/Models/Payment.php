@@ -16,6 +16,7 @@ use PayPay\OpenPaymentAPI\Client;
 use PayPay\OpenPaymentAPI\Models\OrderItem;
 use PayPay\OpenPaymentAPI\Models\CreateQrCodePayload;
 
+use Carbon\Carbon;
 
 class Payment extends Model
 {
@@ -36,10 +37,16 @@ class Payment extends Model
                 'MERCHANT_ID'=> env('PAYPAY_MERCHANT_ID')
             ], true);
 
-            // DBから未決済の決済IDがあったら
+            // DBから未決済の決済IDがあったら、決済完了しているかポーリングする
             $user = User::find(Auth::id());
-            if(Purchase::where("user_id", $user->id)->where("paid_flag", false)->exists()){
-                $purchase = Purchase::where("user_id", $user->id)->where("paid_flag", false)->firstOrFail();
+            // 決済画面の有効期限は５分なので、６分以内はポーリングして欲しいとpaypayのサポートの回答だった
+            // 実際には１時間以上でも１日以上でもエラーにならない決済IDもあった。夜間バッチ？(さらにバグで漏れている？)
+            $purchases = Purchase::where("user_id", $user->id)
+                ->where("paid_flag", false)
+                // 2021-09-25 12:40:56 > 2021-09-25 12:34:56 
+                ->where('updated_at', '>', Carbon::now()->subMinutes(6)->format('Y-m-d H:i:s'))
+                ->get();
+            foreach($purchases as $purchase){
                 $merchantPaymentId = $purchase->merchantPaymentId;        
                 //-------------------------------------
                 // 決済情報を取得する
